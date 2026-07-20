@@ -37,9 +37,9 @@ COMMENT_RE = re.compile(r"//.*?$", re.MULTILINE)
 TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
 
 # Match unquoted JSON keys: word + optional whitespace + colon
-# Handles both line-start indent and comma-separated forms
+# Handles line-start indent, comma-separated, and brace-open forms
 UNQUOTED_KEY_RE = re.compile(
-    r"(^[ \t]*|,\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)", re.MULTILINE
+    r"(^[ \t]*|\{\s*|,\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)", re.MULTILINE
 )
 
 # Capture #include "file"[path] as alias
@@ -57,11 +57,11 @@ EXPR_VALUE_RE = re.compile(
             \$\{[A-Za-z_][A-Za-z0-9_]*\} |  # Variables ${name}
             [A-Za-z_][A-Za-z0-9_]* |  # Functions/Constants
             [\d.]                        |  # Numbers
-            [+\-*/(),]                   |  # Operators
+            [+\-*/(),:\[\]]               |  # Operators / separators
             \s                              # Whitespace
         )+
     )
-    (?=\s*[,\}])            # must end before , or }
+    (?=\s*[,\}]|\s*$)        # must end before , } or end-of-string
     """,
     re.VERBOSE,
 )
@@ -69,7 +69,7 @@ EXPR_VALUE_RE = re.compile(
 INTERP_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 # Allow letters (for function names) and commas in safety check
-ALLOWED_CHARS_RE = re.compile(r"^[A-Za-z0-9+\-*/().,_\s]+$")
+ALLOWED_CHARS_RE = re.compile(r"^[A-Za-z0-9+\-*/().,_:\[\]\s]+$")
 
 MATH_CONSTANTS = {"pi": math.pi, "e": math.e, "tau": math.tau}
 
@@ -192,7 +192,7 @@ def quote_expressions(text: str) -> str:
 
 
 def eval_expression(expr: str, scope: dict) -> Any:
-    # 1. Interpolate variables ${var}
+    # 1. Single variable reference: ${var} → return the value as-is
     match = re.fullmatch(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", expr.strip())
     if match:
         name = match.group(1)
@@ -200,14 +200,22 @@ def eval_expression(expr: str, scope: dict) -> Any:
             return scope[name]
         raise NameError(f"Undefined variable '{name}'")
 
-    # 2. Replace all ${var} with their values
-    expanded = INTERP_RE.sub(r"\1", expr)
+    # 2. If the expression contains ${...}, do string interpolation
+    #    (replace each ${var} with its actual string value)
+    if "${" in expr:
+        def _interp(m):
+            name = m.group(1)
+            if name in scope:
+                return str(scope[name])
+            raise NameError(f"Undefined variable '{name}'")
 
-    # 2. Security Check
-    if not ALLOWED_CHARS_RE.fullmatch(expanded):
-        raise ValueError(f"Invalid characters in expression: {expanded}")
+        return INTERP_RE.sub(_interp, expr)
 
-    # 4. # 3. Evaluate with math functions and context
+    # 3. Security Check — only allow safe characters for eval
+    if not ALLOWED_CHARS_RE.fullmatch(expr):
+        raise ValueError(f"Invalid characters in expression: {expr}")
+
+    # 4. Evaluate as a Python expression with math functions and scope
     def wrap(v):
         if isinstance(v, dict):
             return SimpleNamespace(**{k: wrap(v[k]) for k in v})
@@ -216,7 +224,7 @@ def eval_expression(expr: str, scope: dict) -> Any:
     # Wrap dictionaries in the scope to allow attribute access
     wrapped_scope = {k: wrap(v) for k, v in scope.items()}
 
-    return eval(expanded, {"__builtins__": allowed_functions, **wrapped_scope}, {})
+    return eval(expr, {"__builtins__": allowed_functions, **wrapped_scope}, {})
 
 
 def evaluate(value: Any, scope: dict) -> Any:
