@@ -45,16 +45,32 @@ class TestStripComments:
         result = strip_comments(text)
         assert "//" not in result
 
-    def test_url_in_string_partially_stripped(self):
-        """Known limitation: // inside JSON string values is treated as a comment.
-        JX users should avoid raw URLs with // in config values, or use quoting
-        strategies (e.g. split across lines).
-        """
+    def test_url_in_string_preserved(self):
+        """// inside a JSON string value is NOT treated as a comment."""
         text = '{"url": "https://example.com"}'
         result = strip_comments(text)
-        # The // triggers comment stripping from //example.com onward
-        assert "https:" in result
-        assert "example.com" not in result
+        assert result == text
+
+    def test_url_in_string_with_real_comment(self):
+        """Only // outside strings is stripped; // inside strings is kept."""
+        text = '{"url": "https://example.com"}  // endpoint URL'
+        result = strip_comments(text)
+        assert '"https://example.com"' in result
+        assert "endpoint URL" not in result
+
+    def test_string_with_escaped_quote(self):
+        """// inside a string containing escaped quotes is preserved."""
+        text = r'{"msg": "say \"//hello\""}'
+        result = strip_comments(text)
+        assert result == text
+
+    def test_real_comment_adjacent_to_string(self):
+        """A real // comment right next to a string is still removed."""
+        text = '{"a": "b"}//comment\n{"c": "d"}'
+        result = strip_comments(text)
+        assert "comment" not in result
+        assert '"b"' in result
+        assert '"d"' in result
 
 
 class TestStripTrailingCommas:

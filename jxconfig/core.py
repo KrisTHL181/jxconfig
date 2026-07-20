@@ -33,7 +33,10 @@ import re
 from types import SimpleNamespace
 from typing import Any
 
-COMMENT_RE = re.compile(r"//.*?$", re.MULTILINE)
+# Match either a double-quoted string (to preserve // inside values) or a // comment.
+# The string alternative must come first so string content with // is captured as
+# a string rather than stripped as a comment.
+COMMENT_RE = re.compile(r'("(?:[^"\\]|\\.)*")|//.*?$', re.MULTILINE)
 TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
 
 # Match unquoted JSON keys: word + optional whitespace + colon
@@ -160,7 +163,13 @@ def process_directives(text: str, current_dir: str, seen_files: set) -> tuple[st
 
 
 def strip_comments(text: str) -> str:
-    return COMMENT_RE.sub("", text)
+    """Remove // line comments while preserving // that appears inside string values."""
+    def _repl(m: re.Match) -> str:
+        if m.group(1) is not None:  # String literal — keep as-is
+            return m.group(1)
+        return ""  # Comment — remove
+
+    return COMMENT_RE.sub(_repl, text)
 
 
 def quote_unquoted_keys(text: str) -> str:
