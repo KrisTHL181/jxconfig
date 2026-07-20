@@ -36,7 +36,7 @@ from typing import Any
 # Match either a double-quoted string (to preserve // inside values) or a // comment.
 # The string alternative must come first so string content with // is captured as
 # a string rather than stripped as a comment.
-COMMENT_RE = re.compile(r'("(?:[^"\\]|\\.)*")|//.*?$', re.MULTILINE)
+COMMENT_RE = re.compile(r'("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\')|//.*?$', re.MULTILINE)
 TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
 
 # Match unquoted JSON keys: word + optional whitespace + colon
@@ -172,6 +172,22 @@ def strip_comments(text: str) -> str:
     return COMMENT_RE.sub(_repl, text)
 
 
+def quote_single_quoted_strings(text: str) -> str:
+    """Convert single-quoted strings to double-quoted JSON strings.
+
+    Handles escaped single quotes (\\') and embedded double quotes.
+    """
+    def _repl(m):
+        content = m.group(0)[1:-1]  # strip the outer single quotes
+        # Unescape \' → '
+        content = content.replace("\\'", "'")
+        # Escape " → \"
+        content = content.replace('"', '\\"')
+        return f'"{content}"'
+
+    return re.sub(r"'(?:[^'\\]|\\.)*'", _repl, text)
+
+
 def quote_unquoted_keys(text: str) -> str:
     """Wrap bare identifier keys in double quotes so the result is valid JSON."""
     return UNQUOTED_KEY_RE.sub(r'\1"\2"\3', text)
@@ -274,6 +290,7 @@ def load_jx(text: str, current_dir: str = ".", seen_files: set | None = None) ->
 
     # 2. Existing cleanup
     text = strip_comments(text)
+    text = quote_single_quoted_strings(text)
     text = quote_unquoted_keys(text)
     text = strip_trailing_commas(text)
     text = quote_expressions(text)

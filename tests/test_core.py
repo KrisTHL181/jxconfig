@@ -72,6 +72,56 @@ class TestStripComments:
         assert '"b"' in result
         assert '"d"' in result
 
+    def test_slash_slash_inside_single_quoted_string_preserved(self):
+        """// inside a single-quoted string value is NOT treated as a comment."""
+        text = "{'url': 'https://example.com'}"
+        result = strip_comments(text)
+        assert "https://example.com" in result
+
+    def test_single_quoted_with_real_comment(self):
+        """Only // outside single-quoted strings is stripped."""
+        text = "{'url': 'https://example.com'}  // endpoint URL"
+        result = strip_comments(text)
+        assert "https://example.com" in result
+        assert "endpoint URL" not in result
+
+
+class TestQuoteSingleQuotedStrings:
+    def test_single_quoted_key(self):
+        from jxconfig.core import quote_single_quoted_strings
+        result = quote_single_quoted_strings("{'a': 1}")
+        assert result == '{"a": 1}'
+
+    def test_single_quoted_value(self):
+        from jxconfig.core import quote_single_quoted_strings
+        result = quote_single_quoted_strings('{"a": \'hello\'}')
+        assert result == '{"a": "hello"}'
+
+    def test_both_key_and_value_single_quoted(self):
+        from jxconfig.core import quote_single_quoted_strings
+        result = quote_single_quoted_strings("{'a': 'hello'}")
+        assert result == '{"a": "hello"}'
+
+    def test_escaped_single_quote_inside(self):
+        from jxconfig.core import quote_single_quoted_strings
+        result = quote_single_quoted_strings("{'it\\'s': 'it\\'s ok'}")
+        assert result == '{"it\'s": "it\'s ok"}'
+
+    def test_double_quotes_inside_single_quoted(self):
+        from jxconfig.core import quote_single_quoted_strings
+        result = quote_single_quoted_strings("{'a': 'say \"hi\"'}")
+        assert result == '{"a": "say \\"hi\\""}'
+
+    def test_double_quoted_strings_unchanged(self):
+        from jxconfig.core import quote_single_quoted_strings
+        result = quote_single_quoted_strings('{"a": "hello"}')
+        assert result == '{"a": "hello"}'
+
+    def test_mixed_quotes(self):
+        from jxconfig.core import quote_single_quoted_strings
+        result = quote_single_quoted_strings("{'a': \"double\", 'b': 'single'}")
+        assert result == '{"a": "double", "b": "single"}'
+
 
 class TestStripTrailingCommas:
     def test_object_trailing_comma(self):
@@ -338,6 +388,16 @@ class TestLoadJx:
     def test_load_module_function(self):
         config = load_jx("{len: sqrt(16) + max(1, 2, 3)}")
         assert config["len"] == 4 + 3  # sqrt(16) + max(1,2,3)
+
+    def test_single_quoted_keys_and_values(self):
+        config = load_jx("{'name': 'test', 'port': 8080}")
+        assert config["name"] == "test"
+        assert config["port"] == 8080
+
+    def test_single_quoted_keys_with_expressions(self):
+        config = load_jx("{'base': 100, 'tax': base * 0.2}")
+        assert config["base"] == 100
+        assert config["tax"] == 20.0
 
 
 # ---------------------------------------------------------------------------
