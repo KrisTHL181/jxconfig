@@ -441,6 +441,105 @@ class TestIncludes:
         with pytest.raises(FileNotFoundError):
             load_jx('#include "nonexistent_file_12345.jx"')
 
+    # ------------------------------------------------------------------
+    # Recursive / circular #include
+    # ------------------------------------------------------------------
+
+    def test_circular_self_include(self):
+        """A file that directly includes itself raises RecursionError."""
+        fd, file_path = tempfile.mkstemp(suffix=".jx")
+        os.close(fd)
+        try:
+            basename = os.path.basename(file_path)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(f'{{\n#include "{basename}"\n}}')
+
+            with pytest.raises(RecursionError, match="Circular include"):
+                with open(file_path, encoding="utf-8") as f:
+                    load_jx(f.read(), current_dir=os.path.dirname(file_path))
+        finally:
+            os.unlink(file_path)
+
+    def test_circular_two_file_include(self):
+        """A→B→A circular include raises RecursionError."""
+        fd_a, path_a = tempfile.mkstemp(suffix=".jx")
+        fd_b, path_b = tempfile.mkstemp(suffix=".jx")
+        os.close(fd_a)
+        os.close(fd_b)
+        try:
+            with open(path_a, "w", encoding="utf-8") as f:
+                f.write(f'{{\n#include "{path_b}"\n}}')
+            with open(path_b, "w", encoding="utf-8") as f:
+                f.write(f'{{\n#include "{path_a}"\n}}')
+
+            with pytest.raises(RecursionError, match="Circular include"):
+                with open(path_a, encoding="utf-8") as f:
+                    load_jx(f.read(), current_dir=os.path.dirname(path_a))
+        finally:
+            os.unlink(path_a)
+            os.unlink(path_b)
+
+    def test_circular_three_file_include(self):
+        """A→B→C→A circular include raises RecursionError."""
+        fd_a, path_a = tempfile.mkstemp(suffix=".jx")
+        fd_b, path_b = tempfile.mkstemp(suffix=".jx")
+        fd_c, path_c = tempfile.mkstemp(suffix=".jx")
+        os.close(fd_a)
+        os.close(fd_b)
+        os.close(fd_c)
+        try:
+            with open(path_a, "w", encoding="utf-8") as f:
+                f.write(f'{{\n#include "{path_b}"\n}}')
+            with open(path_b, "w", encoding="utf-8") as f:
+                f.write(f'{{\n#include "{path_c}"\n}}')
+            with open(path_c, "w", encoding="utf-8") as f:
+                f.write(f'{{\n#include "{path_a}"\n}}')
+
+            with pytest.raises(RecursionError, match="Circular include"):
+                with open(path_a, encoding="utf-8") as f:
+                    load_jx(f.read(), current_dir=os.path.dirname(path_a))
+        finally:
+            os.unlink(path_a)
+            os.unlink(path_b)
+            os.unlink(path_c)
+
+    def test_include_with_data_flow_before_cycle(self):
+        """Data defined before the circular include is still accessible."""
+        fd_a, path_a = tempfile.mkstemp(suffix=".jx")
+        fd_b, path_b = tempfile.mkstemp(suffix=".jx")
+        os.close(fd_a)
+        os.close(fd_b)
+        try:
+            with open(path_a, "w", encoding="utf-8") as f:
+                f.write(
+                    dedent(
+                        f"""\
+                        {{
+                            version: 1,
+                        }}
+                        #include "{path_b}"
+                        """
+                    )
+                )
+            with open(path_b, "w", encoding="utf-8") as f:
+                f.write(
+                    dedent(
+                        f"""\
+                        {{
+                            name: "shared-config",
+                        }}
+                        #include "{path_a}"
+                        """
+                    )
+                )
+
+            with pytest.raises(RecursionError, match="Circular include"):
+                with open(path_a, encoding="utf-8") as f:
+                    load_jx(f.read(), current_dir=os.path.dirname(path_a))
+        finally:
+            os.unlink(path_a)
+            os.unlink(path_b)
+
 
 # ---------------------------------------------------------------------------
 # Utility functions
